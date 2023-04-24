@@ -62,7 +62,7 @@
     "node-fetch": "3.2.10",
     "ps-tree": "^1.2.0",
     "which": "^2.0.2",
-    "yaml": "^2.1.1"
+    "yaml": "^2.2.2"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^6.2.2",
