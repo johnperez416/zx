@@ -12,6 +12,10 @@ await $`whoami`
 await $`echo ${__dirname}`
 ```
 
+~~~js
+await $`echo "tilde"`
+~~~
+
 ```js
 console.log(chalk.yellowBright(__filename))
 ```

@@ -12,68 +12,77 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import * as globbyModule from 'globby'
-import minimist from 'minimist'
-import nodeFetch, { RequestInfo, RequestInit } from 'node-fetch'
+import assert from 'node:assert'
 import { createInterface } from 'node:readline'
-import { $, ProcessOutput } from './core.js'
-import { Duration, isString, parseDuration } from './util.js'
+import { $, within, ProcessOutput } from './core.js'
+import {
+  type Duration,
+  identity,
+  isStringLiteral,
+  parseBool,
+  parseDuration,
+  toCamelCase,
+} from './util.js'
+import {
+  type RequestInfo,
+  type RequestInit,
+  nodeFetch,
+  minimist,
+} from './vendor.js'
 
-export { default as chalk } from 'chalk'
-export { default as fs } from 'fs-extra'
-export { default as which } from 'which'
-export { default as YAML } from 'yaml'
 export { default as path } from 'node:path'
-export { default as os } from 'node:os'
+export * as os from 'node:os'
 
-export let argv = minimist(process.argv.slice(2))
-export function updateArgv(args: string[]) {
-  argv = minimist(args)
-  ;(global as any).argv = argv
+type ArgvOpts = minimist.Opts & { camelCase?: boolean; parseBoolean?: boolean }
+
+export const parseArgv = (
+  args: string[] = process.argv.slice(2),
+  opts: ArgvOpts = {}
+): minimist.ParsedArgs =>
+  Object.entries(minimist(args, opts)).reduce<minimist.ParsedArgs>(
+    (m, [k, v]) => {
+      const kTrans = opts.camelCase ? toCamelCase : identity
+      const vTrans = opts.parseBoolean ? parseBool : identity
+      const [_k, _v] = k === '--' || k === '_' ? [k, v] : [kTrans(k), vTrans(v)]
+      m[_k] = _v
+      return m
+    },
+    {} as minimist.ParsedArgs
+  )
+
+export function updateArgv(args?: string[], opts?: ArgvOpts) {
+  for (const k in argv) delete argv[k]
+  Object.assign(argv, parseArgv(args, opts))
 }
 
-export const globby = Object.assign(function globby(
-  patterns: string | readonly string[],
-  options?: globbyModule.Options
-) {
-  return globbyModule.globby(patterns, options)
-},
-globbyModule)
-export const glob = globby
+export const argv: minimist.ParsedArgs = parseArgv()
 
-export function sleep(duration: Duration) {
+export function sleep(duration: Duration): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, parseDuration(duration))
   })
 }
 
-export async function fetch(url: RequestInfo, init?: RequestInit) {
-  $.log({ kind: 'fetch', url, init })
+export async function fetch(
+  url: RequestInfo,
+  init?: RequestInit
+): Promise<Response> {
+  $.log({ kind: 'fetch', url, init, verbose: !$.quiet && $.verbose })
   return nodeFetch(url, init)
 }
 
 export function echo(...args: any[]): void
 export function echo(pieces: TemplateStringsArray, ...args: any[]) {
-  let msg
   const lastIdx = pieces.length - 1
-  if (
-    Array.isArray(pieces) &&
-    pieces.every(isString) &&
-    lastIdx === args.length
-  ) {
-    msg =
-      args.map((a, i) => pieces[i] + stringify(a)).join('') + pieces[lastIdx]
-  } else {
-    msg = [pieces, ...args].map(stringify).join(' ')
-  }
+  const msg = isStringLiteral(pieces, ...args)
+    ? args.map((a, i) => pieces[i] + stringify(a)).join('') + pieces[lastIdx]
+    : [pieces, ...args].map(stringify).join(' ')
+
   console.log(msg)
 }
 
 function stringify(arg: ProcessOutput | any) {
-  if (arg instanceof ProcessOutput) {
-    return arg.toString().replace(/\n$/, '')
-  }
-  return `${arg}`
+  return arg instanceof ProcessOutput ? arg.toString().trimEnd() : `${arg}`
 }
 
 export async function question(
@@ -104,11 +113,105 @@ export async function question(
   )
 }
 
-export async function stdin() {
+export async function stdin(): Promise<string> {
   let buf = ''
   process.stdin.setEncoding('utf8')
   for await (const chunk of process.stdin) {
     buf += chunk
   }
   return buf
+}
+
+export async function retry<T>(count: number, callback: () => T): Promise<T>
+export async function retry<T>(
+  count: number,
+  duration: Duration | Generator<number>,
+  callback: () => T
+): Promise<T>
+export async function retry<T>(
+  count: number,
+  a: Duration | Generator<number> | (() => T),
+  b?: () => T
+): Promise<T> {
+  const total = count
+  let callback: () => T
+  let delayStatic = 0
+  let delayGen: Generator<number> | undefined
+  if (typeof a === 'function') {
+    callback = a
+  } else {
+    if (typeof a === 'object') {
+      delayGen = a
+    } else {
+      delayStatic = parseDuration(a)
+    }
+    assert(b)
+    callback = b
+  }
+  let lastErr: unknown
+  let attempt = 0
+  while (count-- > 0) {
+    attempt++
+    try {
+      return await callback()
+    } catch (err) {
+      let delay = 0
+      if (delayStatic > 0) delay = delayStatic
+      if (delayGen) delay = delayGen.next().value
+      $.log({
+        kind: 'retry',
+        total,
+        attempt,
+        delay,
+        exception: err,
+        verbose: !$.quiet && $.verbose,
+        error: `FAIL Attempt: ${attempt}/${total}, next: ${delay}`, // legacy
+      })
+      lastErr = err
+      if (count == 0) break
+      if (delay) await sleep(delay)
+    }
+  }
+  throw lastErr
+}
+
+export function* expBackoff(
+  max: Duration = '60s',
+  rand: Duration = '100ms'
+): Generator<number, void, unknown> {
+  const maxMs = parseDuration(max)
+  const randMs = parseDuration(rand)
+  let n = 1
+  while (true) {
+    const ms = Math.floor(Math.random() * randMs)
+    yield Math.min(2 ** n++, maxMs) + ms
+  }
+}
+
+export async function spinner<T>(callback: () => T): Promise<T>
+export async function spinner<T>(title: string, callback: () => T): Promise<T>
+export async function spinner<T>(
+  title: string | (() => T),
+  callback?: () => T
+): Promise<T> {
+  if (typeof title == 'function') {
+    callback = title
+    title = ''
+  }
+  if ($.quiet || process.env.CI) return callback!()
+
+  let i = 0
+  const spin = () =>
+    process.stderr.write(`  ${'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[i++ % 10]} ${title}\r`)
+  return within(async () => {
+    $.verbose = false
+    const id = setInterval(spin, 100)
+
+    try {
+      return await callback!()
+    } finally {
+      clearInterval(id as NodeJS.Timeout)
+      process.stderr.write(' '.repeat((process.stdout.columns || 1) - 1) + '\r')
+    }
+  })
 }

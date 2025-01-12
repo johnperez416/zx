@@ -12,46 +12,92 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { suite } from 'uvu'
-import * as assert from 'uvu/assert'
-import '../build/globals.js'
+import assert from 'node:assert'
+import { test, describe, after, before } from 'node:test'
+import { $, within, path, glob } from '../build/index.js'
 
-const test = suite('package')
+const __dirname = new URL('.', import.meta.url).pathname
+const root = path.resolve(__dirname, '..')
 
-test.before.each(async () => {
-  $.verbose = false
-  const pack = await $`npm pack`
-  await $`tar xf ${pack}`
-  await $`rm ${pack}`.nothrow()
-})
-
-test('ts project', async () => {
-  const pack = path.resolve('package')
-  const out = await within(async () => {
-    cd('test/fixtures/ts-project')
-    await $`npm i`
-    await $`rm -rf node_modules/zx`
-    await $`mv ${pack} node_modules/zx`
-    try {
-      await $`npx tsc`
-    } catch (err) {
-      throw new Error(err.stdout)
-    }
-    return $`node build/script.js`
+describe('package', () => {
+  before(async () => {
+    const pack = await $`npm pack`
+    await $`tar xf ${pack}`
+    await $`rm ${pack}`.nothrow()
   })
-  assert.match(out.stderr, 'ts-script')
-})
-
-test('js project with zx', async () => {
-  const pack = path.resolve('package')
-  const out = await within(async () => {
-    cd('test/fixtures/js-project')
-    await $`rm -rf node_modules`
-    await $`mkdir node_modules`
-    await $`mv ${pack} node_modules/zx`
-    return $`node node_modules/zx/build/cli.js script.js`
+  after(async () => {
+    await $`rm -rf package`
   })
-  assert.match(out.stderr, 'js-script')
-})
 
-test.run()
+  test('content looks fine', async () => {
+    const files = await glob('**/*', {
+      cwd: path.resolve(root, 'package'),
+      absolute: false,
+      onlyFiles: true,
+    })
+    assert.deepEqual(
+      files.sort(),
+      [
+        'LICENSE',
+        'README.md',
+        'package.json',
+        'man/zx.1',
+        'build/cli.cjs',
+        'build/cli.d.ts',
+        'build/cli.js',
+        'build/core.cjs',
+        'build/core.d.ts',
+        'build/core.js',
+        'build/deno.js',
+        'build/deps.cjs',
+        'build/deps.d.ts',
+        'build/deps.js',
+        'build/esblib.cjs',
+        'build/globals.cjs',
+        'build/globals.d.ts',
+        'build/globals.js',
+        'build/goods.cjs',
+        'build/goods.d.ts',
+        'build/goods.js',
+        'build/index.cjs',
+        'build/index.d.ts',
+        'build/index.js',
+        'build/util.cjs',
+        'build/util.d.ts',
+        'build/util.js',
+        'build/vendor-core.cjs',
+        'build/vendor-core.d.ts',
+        'build/vendor-core.js',
+        'build/vendor-extra.cjs',
+        'build/vendor-extra.d.ts',
+        'build/vendor-extra.js',
+        'build/vendor.cjs',
+        'build/vendor.d.ts',
+        'build/vendor.js',
+      ].sort()
+    )
+  })
+
+  test('ts project', async () => {
+    const out = await within(async () => {
+      $.cwd = path.resolve(__dirname, 'fixtures/ts-project')
+      await $`npm i --no-package-lock`
+      try {
+        await $`npx tsc`
+      } catch (err) {
+        throw new Error(err.stdout)
+      }
+      return $`node build/script.js`
+    })
+    assert.match(out.stderr, /ts-script/)
+  })
+
+  test('js project with zx', async () => {
+    const out = await within(async () => {
+      $.cwd = path.resolve(__dirname, 'fixtures/js-project')
+      await $`npm i --no-package-lock`
+      return $`node node_modules/zx/build/cli.js --verbose script.js`
+    })
+    assert.match(out.stderr, /js-script/)
+  })
+})

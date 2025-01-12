@@ -1,7 +1,7 @@
 # Markdown Scripts
 
 It's possible to write scripts using markdown. Only code blocks will be executed
-by zx. 
+by zx.
 
 > You can run this markdown file:
 >
@@ -12,6 +12,10 @@ by zx.
 ```js
 await $`whoami`
 await $`echo ${__dirname}`
+```
+
+```ts
+await $`pwd`
 ```
 
 The `__filename` will be pointed to **markdown.md**:
@@ -37,6 +41,6 @@ Other code blocks are ignored:
 
 ```css
 body .hero {
-    margin: 42px;
+  margin: 42px;
 }
 ```

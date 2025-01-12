@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { $ } from '../src/core.js'
-import { echo, sleep } from '../src/goods.js'
+import { expectType } from 'tsd'
+import { $, echo, sleep, spinner, retry, expBackoff } from 'zx'
 
 echo`Date is ${await $`date`}`
 echo('Hello, world!')
 
 await sleep('1s')
 await sleep(1000)
+
+expectType<'foo'>(await spinner(() => 'foo' as 'foo'))
+expectType<'bar'>(await spinner('title', () => 'bar' as 'bar'))
+expectType<'foo'>(await retry(0, () => 'foo' as 'foo'))
+expectType<Generator<number, void, unknown>>(expBackoff())

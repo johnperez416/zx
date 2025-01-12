@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { expectType } from 'tsd'
-import { spinner } from '../src/experimental.js'
+import { assert } from 'https://deno.land/std@0.224.0/assert/assert.ts'
+import { $ } from '../../build/index.js'
+import '../../build/cli.js'
 
-expectType<string>(await spinner(() => 'foo'))
-expectType<string>(await spinner('title', () => 'bar'))
+Deno.test('deno smoke test', async () => {
+  // smoke test
+  {
+    const p = await $`echo foo`
+    assert(p.valueOf() === 'foo')
+  }
+
+  // captures err stack
+  {
+    const p = await $({ nothrow: true })`echo foo; exit 3`
+    assert(p.message.match(/exit code: 3/))
+  }
+})
